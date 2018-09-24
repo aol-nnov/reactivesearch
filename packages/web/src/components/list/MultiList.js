@@ -63,17 +63,27 @@ class MultiList extends Component {
 			nextProps.react,
 			() => this.setReact(nextProps),
 		);
+
 		checkPropChange(
 			this.props.options,
 			nextProps.options,
 			() => {
-				this.setState({
-					options: nextProps.options[nextProps.dataField]
-						? nextProps.options[nextProps.dataField].buckets
-						: [],
-				});
+                if (!this.props.nestedField) {
+                    this.setState({
+                        options: nextProps.options[nextProps.dataField]
+                            ? nextProps.options[nextProps.dataField].buckets
+                            : [],
+                    });
+                } else {
+                    this.setState({
+                        options: nextProps.options[nextProps.nestedField][nextProps.dataField]
+                            ? nextProps.options[nextProps.nestedField][nextProps.dataField].buckets
+                            : [],
+                    });
+                }
 			},
 		);
+
 		checkSomePropChange(
 			this.props,
 			nextProps,
@@ -81,9 +91,10 @@ class MultiList extends Component {
 			() => this.updateQueryOptions(nextProps),
 		);
 
-		checkPropChange(
-			this.props.dataField,
-			nextProps.dataField,
+		checkSomePropChange(
+			this.props,
+			nextProps,
+			['dataField', 'nestedField'],
 			() => {
 				this.updateQueryOptions(nextProps);
 				this.updateQuery(Object.keys(this.state.currentValue), nextProps);
@@ -174,13 +185,27 @@ class MultiList extends Component {
 				}
 			} else {
 				// adds a sub-query with must as an array of objects for each term/value
-				const queryArray = value.map(item => (
-					{
-						[type]: {
-							[props.dataField]: item,
-						},
-					}
-				));
+                let queryArray;
+                if(!props.nestedField) {
+                    queryArray = value.map(item => (
+                        {
+                            [type]: {
+                                [props.dataField]: item,
+                            },
+                        }
+                    ));
+                } else {
+                    queryArray = value.map(item => ({
+                        nested: {
+                            path: props.nestedField,
+                            query: {
+                                [type]: {
+                                    [`${props.nestedField}.${props.dataField}`]: item,
+                                },
+                            },
+                        },
+                    }));
+                }
 				listQuery = {
 					bool: {
 						must: queryArray,
@@ -280,16 +305,36 @@ class MultiList extends Component {
 	static generateQueryOptions(props) {
 		const queryOptions = getQueryOptions(props);
 		queryOptions.size = 0;
-		queryOptions.aggs = {
-			[props.dataField]: {
-				terms: {
-					field: props.dataField,
-					size: props.size,
-					order: getAggsOrder(props.sortBy || 'count'),
-					...(props.showMissing ? { missing: props.missingLabel } : {}),
-				},
-			},
-		};
+		if(!props.nestedField) {
+            queryOptions.aggs = {
+                [props.dataField]: {
+                    terms: {
+                        field: props.dataField,
+                        size: props.size,
+                        order: getAggsOrder(props.sortBy || 'count'),
+                        ...(props.showMissing ? {missing: props.missingLabel} : {}),
+                    },
+                },
+            };
+        } else {
+		    queryOptions.aggs = {
+                [props.nestedField]: {
+                    nested: {
+                        path: props.nestedField,
+                    },
+                    aggs: {
+                        [props.dataField]: {
+                            terms: {
+                                field: `${props.nestedField}.${props.dataField}`,
+                                size: props.size,
+                                order: getAggsOrder(props.sortBy || 'count'),
+                                ...(props.showMissing ? {missing: props.missingLabel} : {}),
+                            },
+                        },
+                    },
+                },
+            };
+        }
 
 		return queryOptions;
 	}
@@ -441,6 +486,7 @@ MultiList.propTypes = {
 	componentId: types.stringRequired,
 	customQuery: types.func,
 	dataField: types.stringRequired,
+    nestedField: types.string,
 	defaultSelected: types.stringArray,
 	filterLabel: types.string,
 	innerClass: types.style,
